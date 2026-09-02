@@ -9,14 +9,20 @@ cd "$REPO_DIR" || exit 1
 passed=0
 failed=0
 
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
+	GREEN=$'\033[32m' RED=$'\033[31m' YELLOW=$'\033[33m' RESET=$'\033[0m'
+else
+	GREEN="" RED="" YELLOW="" RESET=""
+fi
+
 check() {
 	local description=$1
 	shift
 	if output=$("$@" 2>&1); then
-		printf '\033[32mok\033[0m   %s\n' "$description"
+		printf '%sok%s   %s\n' "$GREEN" "$RESET" "$description"
 		passed=$((passed + 1))
 	else
-		printf '\033[31mfail\033[0m %s\n' "$description"
+		printf '%sfail%s %s\n' "$RED" "$RESET" "$description"
 		printf '%s\n' "$output" | sed 's/^/       /'
 		failed=$((failed + 1))
 	fi
@@ -52,7 +58,7 @@ if command -v tmux >/dev/null 2>&1 && [ -d "$HOME/.tmux/plugins/tpm" ]; then
 	check "tmux loads config/tmux.conf" bash -c '
 		tmux -f config/tmux.conf -L claude-tmux-smoke start-server \; kill-server'
 else
-	printf '\033[33mskip\033[0m %s\n' "tmux config load (tmux or plugins missing)"
+	printf '%sskip%s %s\n' "$YELLOW" "$RESET" "tmux config load (tmux or plugins missing)"
 fi
 
 if command -v jq >/dev/null 2>&1; then

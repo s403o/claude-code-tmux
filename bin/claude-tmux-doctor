@@ -10,14 +10,21 @@ TPM_DIR=$HOME/.tmux/plugins/tpm
 failures=0
 warnings=0
 
-pass() { printf '  \033[32mok\033[0m    %s\n' "$1"; }
+# Colour only when a human is watching: piped output stays greppable.
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
+	GREEN=$'\033[32m' RED=$'\033[31m' YELLOW=$'\033[33m' RESET=$'\033[0m'
+else
+	GREEN="" RED="" YELLOW="" RESET=""
+fi
+
+pass() { printf '  %sok%s    %s\n' "$GREEN" "$RESET" "$1"; }
 fail() {
-	printf '  \033[31mfail\033[0m  %s\n' "$1"
+	printf '  %sfail%s  %s\n' "$RED" "$RESET" "$1"
 	[ $# -gt 1 ] && printf '        %s\n' "$2"
 	failures=$((failures + 1))
 }
 warn() {
-	printf '  \033[33mwarn\033[0m  %s\n' "$1"
+	printf '  %swarn%s  %s\n' "$YELLOW" "$RESET" "$1"
 	[ $# -gt 1 ] && printf '        %s\n' "$2"
 	warnings=$((warnings + 1))
 }

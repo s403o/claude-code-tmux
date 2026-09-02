@@ -11,12 +11,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install shellcheck and shfmt
+        # Pinned so CI and a developer's machine flag exactly the same things;
+        # the apt build lags far enough behind to disagree about new checks.
+        env:
+          SHELLCHECK_VERSION: v0.11.0
+          SHFMT_VERSION: v3.14.0
         run: |
-          sudo apt-get update
-          sudo apt-get install -y shellcheck
-          curl -sSfL -o /usr/local/bin/shfmt \
-            https://github.com/mvdan/sh/releases/download/v3.10.0/shfmt_v3.10.0_linux_amd64
+          curl -sSfL "https://github.com/koalaman/shellcheck/releases/download/${SHELLCHECK_VERSION}/shellcheck-${SHELLCHECK_VERSION}.linux.x86_64.tar.xz" \
+            | sudo tar -xJ --strip-components=1 -C /usr/local/bin "shellcheck-${SHELLCHECK_VERSION}/shellcheck"
+          sudo curl -sSfL -o /usr/local/bin/shfmt \
+            "https://github.com/mvdan/sh/releases/download/${SHFMT_VERSION}/shfmt_${SHFMT_VERSION}_linux_amd64"
           sudo chmod +x /usr/local/bin/shfmt
+          shellcheck --version
+          shfmt --version
       - run: make lint
       - run: make fmt-check
 
@@ -50,10 +57,13 @@ jobs:
           ./install.sh --yes --no-brew
           # claude itself is not available on CI, so doctor is expected to fail
           # on that one check; assert the rest by grepping its output.
+          # doctor exits non-zero here because the claude CLI is not on CI,
+          # so assert the individual checks instead of the exit status.
           set +e
-          output=$(PATH="$HOME/.local/bin:$PATH" ./bin/claude-tmux-doctor)
+          output=$(PATH="$HOME/.local/bin:$PATH" NO_COLOR=1 ./bin/claude-tmux-doctor)
           set -e
           echo "$output"
-          echo "$output" | grep -q "ok    plugin tmux present"
-          echo "$output" | grep -q "ok    .teammateMode = tmux"
+          grep -q "ok    plugin tmux present" <<<"$output"
+          grep -q "ok    .teammateMode = tmux" <<<"$output"
+          grep -q "ok    claude-tmux on PATH" <<<"$output"
           ./uninstall.sh

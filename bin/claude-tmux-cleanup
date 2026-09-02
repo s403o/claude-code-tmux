@@ -179,7 +179,9 @@ while IFS= read -r pid; do
 	case " $self_ancestors " in *" $pid "*) continue ;; esac
 
 	tty=$(ps -o tty= -p "$pid" 2>/dev/null | tr -d ' ')
-	[ -n "$tty" ] && [ "$tty" != "??" ] || continue
+	if [ -z "$tty" ] || [ "$tty" = "??" ]; then
+		continue
+	fi
 	printf '%s\n' "$pane_ttys" | grep -qx "$tty" && continue
 
 	stray+=("$pid")
