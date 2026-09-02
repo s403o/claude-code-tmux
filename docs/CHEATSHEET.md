@@ -16,6 +16,41 @@ between them.
 One pane per teammate, plus your lead pane. `prefix` + `t` to tile them,
 `prefix` + `z` to zoom one, `prefix` + `d` to detach and leave them running.
 
+### A demo team, no real work
+
+The prompt behind the screenshot in the README — the agents only introduce
+themselves, so the panes appear instantly:
+
+```
+Create a team of 3, and have each agent print one line saying hi and what its
+role is: agent 1 maps the compose services and env vars, agent 2 checks the k3d
+cluster config, agent 3 lists mismatches between them. No tools, no file reads.
+```
+
+### More prompts in the same shape
+
+```
+Create a team of 3: one to audit the Terraform modules for hardcoded secrets,
+one to diff the staging and prod variable files, one to write up what has
+drifted.
+
+Create a team of 4, one per service (api, worker, scheduler, web): each one
+upgrades its own Dockerfile to the new base image and runs its test suite.
+
+Create a team of 2: one to reproduce the failing integration test, one to
+bisect the last 20 commits for where it broke. Report to me before changing
+anything.
+```
+
+### What makes a team prompt work
+
+- **Name the count.** "A team of 3" is unambiguous; "some agents" is not.
+- **Give each agent a job it can finish alone.** Agents that need each other's
+  output serialise, and you lose the point of watching them in parallel.
+- **Split by file, service or directory** so two agents never edit one file.
+- **Say what to do at the end** ("list mismatches", "report to me before
+  changing anything") so the run has a clear finish line.
+
 ## Sessions
 
 | Command | Action |
