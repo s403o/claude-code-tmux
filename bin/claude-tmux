@@ -1,0 +1,149 @@
+#!/usr/bin/env bash
+# Launch Claude Code inside a tmux session so agent teams get real panes.
+#
+# Claude Code spawns each teammate into a new tmux pane when it is started
+# from inside tmux. Outside tmux the teammates still run, but you cannot watch
+# them. This wrapper makes "inside tmux" the default without extra typing.
+set -euo pipefail
+
+PROGRAM_NAME=${0##*/}
+
+usage() {
+	cat <<'USAGE'
+Usage: claude-tmux [session] [directory] [options] [-- claude-args...]
+
+Starts (or re-attaches to) a tmux session and runs Claude Code inside it.
+
+Arguments:
+  session          tmux session name. Default: sanitized basename of the
+                   working directory, so each project gets its own session.
+  directory        Working directory for the session. Default: current dir.
+
+Options:
+  -n, --name NAME  Session name (same as the first positional argument).
+  -d, --dir DIR    Working directory (same as the second positional argument).
+  -l, --list       List running Claude Code tmux sessions and exit.
+  -h, --help       Show this help and exit.
+
+Anything after -- is passed straight to the claude CLI.
+
+Examples:
+  claude-tmux                        # session named after the current directory
+  claude-tmux api ~/code/api         # explicit session name and directory
+  claude-tmux -- --model sonnet      # extra flags for claude itself
+USAGE
+}
+
+# tmux rejects dots and colons in session names; everything else is fair game.
+sanitize_session_name() {
+	printf '%s' "$1" | tr '.:' '__'
+}
+
+list_sessions() {
+	if ! tmux list-sessions >/dev/null 2>&1; then
+		echo "No tmux sessions running."
+		return 0
+	fi
+	tmux list-sessions -F '#{session_name}	#{session_windows} window(s)	#{?session_attached,attached,detached}'
+}
+
+session_name=""
+work_dir=""
+claude_args=()
+
+while [ $# -gt 0 ]; do
+	case "$1" in
+	-h | --help)
+		usage
+		exit 0
+		;;
+	-l | --list)
+		list_sessions
+		exit 0
+		;;
+	-n | --name)
+		[ $# -ge 2 ] || {
+			echo "$PROGRAM_NAME: --name needs a value" >&2
+			exit 2
+		}
+		session_name=$2
+		shift 2
+		;;
+	-d | --dir)
+		[ $# -ge 2 ] || {
+			echo "$PROGRAM_NAME: --dir needs a value" >&2
+			exit 2
+		}
+		work_dir=$2
+		shift 2
+		;;
+	--)
+		shift
+		claude_args=("$@")
+		break
+		;;
+	-*)
+		echo "$PROGRAM_NAME: unknown option '$1' (try --help)" >&2
+		exit 2
+		;;
+	*)
+		if [ -z "$session_name" ]; then
+			session_name=$1
+		elif [ -z "$work_dir" ]; then
+			work_dir=$1
+		else
+			echo "$PROGRAM_NAME: unexpected argument '$1' (try --help)" >&2
+			exit 2
+		fi
+		shift
+		;;
+	esac
+done
+
+command -v tmux >/dev/null 2>&1 || {
+	echo "$PROGRAM_NAME: tmux is not installed. Install it with: brew install tmux" >&2
+	exit 1
+}
+command -v claude >/dev/null 2>&1 || {
+	echo "$PROGRAM_NAME: the claude CLI is not on PATH. See https://claude.com/claude-code" >&2
+	exit 1
+}
+
+work_dir=${work_dir:-$PWD}
+work_dir=${work_dir/#\~/$HOME}
+[ -d "$work_dir" ] || {
+	echo "$PROGRAM_NAME: no such directory: $work_dir" >&2
+	exit 1
+}
+work_dir=$(cd "$work_dir" && pwd)
+
+session_name=$(sanitize_session_name "${session_name:-${work_dir##*/}}")
+
+# Build the command line that runs inside the pane, quoting every argument.
+claude_command="claude"
+for arg in ${claude_args+"${claude_args[@]}"}; do
+	claude_command+=" $(printf '%q' "$arg")"
+done
+
+# Already inside tmux: Claude Code can split panes here, so just run it.
+if [ -n "${TMUX:-}" ]; then
+	echo "Already inside tmux — running Claude Code in this session; teammates will split into new panes."
+	cd "$work_dir"
+	exec claude ${claude_args+"${claude_args[@]}"}
+fi
+
+if tmux has-session -t "=$session_name" 2>/dev/null; then
+	echo "Attaching to existing session '$session_name'."
+	exec tmux attach-session -t "=$session_name"
+fi
+
+echo "Starting session '$session_name' in $work_dir"
+tmux new-session -d -s "$session_name" -c "$work_dir"
+
+# Session-local guards: a teammate pane that exits should disappear, and mouse
+# support makes clicking between agent panes practical.
+tmux set-option -t "=$session_name" remain-on-exit off
+tmux set-option -t "=$session_name" mouse on
+
+tmux send-keys -t "=$session_name" "$claude_command" Enter
+exec tmux attach-session -t "=$session_name"

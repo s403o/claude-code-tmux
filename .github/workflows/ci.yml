@@ -1,0 +1,59 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install shellcheck and shfmt
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+          curl -sSfL -o /usr/local/bin/shfmt \
+            https://github.com/mvdan/sh/releases/download/v3.10.0/shfmt_v3.10.0_linux_amd64
+          sudo chmod +x /usr/local/bin/shfmt
+      - run: make lint
+      - run: make fmt-check
+
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install tmux
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            sudo apt-get update && sudo apt-get install -y tmux
+          else
+            brew install tmux
+          fi
+      - run: make test
+
+  install:
+    # A full install into a throwaway HOME, then doctor, then uninstall.
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: brew install tmux jq
+      - name: Install, verify, uninstall
+        run: |
+          export HOME="$RUNNER_TEMP/fakehome"
+          mkdir -p "$HOME"
+          ./install.sh --yes --no-brew
+          # claude itself is not available on CI, so doctor is expected to fail
+          # on that one check; assert the rest by grepping its output.
+          set +e
+          output=$(PATH="$HOME/.local/bin:$PATH" ./bin/claude-tmux-doctor)
+          set -e
+          echo "$output"
+          echo "$output" | grep -q "ok    plugin tmux present"
+          echo "$output" | grep -q "ok    .teammateMode = tmux"
+          ./uninstall.sh

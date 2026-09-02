@@ -1,0 +1,216 @@
+#!/usr/bin/env bash
+# Tear down Claude Code tmux sessions and report Claude processes left behind.
+#
+# Long agent-team runs leave detached sessions and, occasionally, claude
+# processes whose pane is already gone. This finds both and removes them only
+# after you say so (or after you pass --force).
+set -euo pipefail
+
+PROGRAM_NAME=${0##*/}
+
+usage() {
+	cat <<'USAGE'
+Usage: claude-tmux-cleanup [session ...] [options]
+
+With no session names, lists every tmux session and asks what to kill.
+
+Options:
+  -a, --all        Target every tmux session that is running Claude Code.
+  -A, --every      Target every tmux session, Claude Code or not.
+  -f, --force      Do not ask for confirmation.
+  -n, --dry-run    Print what would happen, change nothing.
+  -p, --prune      Also kill Claude Code processes that are not in a tmux pane.
+                   These are listed before anything happens; combined with
+                   --force this will also kill a plain terminal claude session,
+                   so prefer --dry-run first.
+  -h, --help       Show this help and exit.
+
+Examples:
+  claude-tmux-cleanup                 # interactive sweep
+  claude-tmux-cleanup api             # kill just the "api" session
+  claude-tmux-cleanup --all --force   # kill every Claude session, no prompt
+  claude-tmux-cleanup --prune -n      # list stray claude processes, kill nothing
+USAGE
+}
+
+all_claude=0
+every_session=0
+force=0
+dry_run=0
+prune=0
+targets=()
+
+while [ $# -gt 0 ]; do
+	case "$1" in
+	-h | --help)
+		usage
+		exit 0
+		;;
+	-a | --all) all_claude=1 ;;
+	-A | --every) every_session=1 ;;
+	-f | --force) force=1 ;;
+	-n | --dry-run) dry_run=1 ;;
+	-p | --prune) prune=1 ;;
+	-*)
+		echo "$PROGRAM_NAME: unknown option '$1' (try --help)" >&2
+		exit 2
+		;;
+	*) targets+=("$1") ;;
+	esac
+	shift
+done
+
+command -v tmux >/dev/null 2>&1 || {
+	echo "$PROGRAM_NAME: tmux is not installed." >&2
+	exit 1
+}
+
+# Killing the session you are sitting in takes the terminal with it.
+if [ -n "${TMUX:-}" ]; then
+	echo "$PROGRAM_NAME: run this from outside tmux (detach first with prefix + d)." >&2
+	exit 1
+fi
+
+if ! tmux list-sessions >/dev/null 2>&1; then
+	echo "No tmux sessions running."
+	[ "$prune" -eq 1 ] || exit 0
+fi
+
+session_runs_claude() {
+	tmux list-panes -t "=$1" -F '#{pane_current_command}' 2>/dev/null | grep -qx 'claude'
+}
+
+describe_session() {
+	local session=$1
+	printf '  %s (%s)\n' "$session" \
+		"$(tmux display-message -p -t "=$session" '#{session_windows} window(s), #{?session_attached,attached,detached}')"
+	tmux list-panes -s -t "=$session" \
+		-F '      pane #{window_index}.#{pane_index}: #{pane_current_command} (pid #{pane_pid})' 2>/dev/null || true
+}
+
+kill_session() {
+	local session=$1
+	if [ "$dry_run" -eq 1 ]; then
+		echo "  would kill $session"
+		return 0
+	fi
+	tmux kill-session -t "=$session" && echo "  killed $session"
+}
+
+confirm() {
+	[ "$force" -eq 1 ] && return 0
+	[ "$dry_run" -eq 1 ] && return 0
+	local answer
+	read -r -p "$1 [y/N] " answer
+	case "$answer" in
+	[yY] | [yY][eE][sS]) return 0 ;;
+	*) return 1 ;;
+	esac
+}
+
+mapfile_sessions() {
+	tmux list-sessions -F '#{session_name}' 2>/dev/null || true
+}
+
+selected=()
+
+if [ ${#targets[@]} -gt 0 ]; then
+	for session in "${targets[@]}"; do
+		if tmux has-session -t "=$session" 2>/dev/null; then
+			selected+=("$session")
+		else
+			echo "No session named '$session'." >&2
+		fi
+	done
+elif [ "$every_session" -eq 1 ] || [ "$all_claude" -eq 1 ]; then
+	while IFS= read -r session; do
+		[ -n "$session" ] || continue
+		if [ "$every_session" -eq 1 ] || session_runs_claude "$session"; then
+			selected+=("$session")
+		fi
+	done < <(mapfile_sessions)
+else
+	# Interactive mode: show everything, then ask per session.
+	while IFS= read -r session; do
+		[ -n "$session" ] || continue
+		describe_session "$session"
+		if confirm "Kill session '$session'?"; then
+			selected+=("$session")
+		fi
+	done < <(mapfile_sessions)
+	force=1 # already confirmed one by one
+fi
+
+if [ ${#selected[@]} -gt 0 ]; then
+	if [ "$force" -ne 1 ] && [ "$dry_run" -ne 1 ]; then
+		printf 'About to kill %d session(s):\n' "${#selected[@]}"
+		for session in "${selected[@]}"; do describe_session "$session"; done
+		confirm "Proceed?" || {
+			echo "Nothing killed."
+			selected=()
+		}
+	fi
+	for session in ${selected+"${selected[@]}"}; do
+		kill_session "$session"
+	done
+fi
+
+# Claude Code processes that are not sitting in a live tmux pane. These are
+# what long agent-team runs leave behind, but the same query also catches a
+# plain terminal session, so nothing here is killed without --prune.
+#
+# Two exclusions keep this safe:
+#   - editor integrations (VS Code, JetBrains) drive claude over stdio with no
+#     controlling tty; killing those would take down the user's IDE session
+#   - this script's own ancestors, so a cleanup run never kills the Claude
+#     session that started it
+self_ancestors=""
+walk=$$
+while [ -n "$walk" ] && [ "$walk" != "0" ] && [ "$walk" != "1" ]; do
+	self_ancestors="$self_ancestors $walk"
+	walk=$(ps -o ppid= -p "$walk" 2>/dev/null | tr -d ' ')
+done
+
+pane_ttys=$(tmux list-panes -a -F '#{pane_tty}' 2>/dev/null | sed 's|^/dev/||' || true)
+
+stray=()
+while IFS= read -r pid; do
+	[ -n "$pid" ] || continue
+	case " $self_ancestors " in *" $pid "*) continue ;; esac
+
+	tty=$(ps -o tty= -p "$pid" 2>/dev/null | tr -d ' ')
+	[ -n "$tty" ] && [ "$tty" != "??" ] || continue
+	printf '%s\n' "$pane_ttys" | grep -qx "$tty" && continue
+
+	stray+=("$pid")
+done < <(pgrep -f '(^|/)claude( |$)' 2>/dev/null || true)
+
+if [ ${#stray[@]} -eq 0 ]; then
+	echo "No Claude Code processes outside tmux panes."
+	exit 0
+fi
+
+printf 'Claude Code process(es) running outside any tmux pane:\n'
+ps -o pid=,etime=,command= -p "$(
+	IFS=,
+	echo "${stray[*]}"
+)" 2>/dev/null || true
+
+if [ "$prune" -ne 1 ]; then
+	echo "Re-run with --prune to kill them."
+	exit 0
+fi
+
+if [ "$dry_run" -eq 1 ]; then
+	printf '  would kill %s\n' "${stray[@]}"
+	exit 0
+fi
+
+confirm "Kill ${#stray[@]} process(es) listed above?" || {
+	echo "Left running."
+	exit 0
+}
+
+for pid in "${stray[@]}"; do
+	kill "$pid" 2>/dev/null && echo "  killed pid $pid"
+done
