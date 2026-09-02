@@ -57,7 +57,51 @@ ct --list                 # what is running
 ct -- --model sonnet      # pass flags through to claude
 ```
 
-Ask Claude Code for a team ("split this across three agents") and each teammate appears in its own pane.
+### Asking for a team
+
+Once Claude Code is running inside the session, you get panes by asking for a
+team in the prompt. Say how many agents you want and give each one a distinct
+job — Claude Code spawns one teammate per job, and each teammate lands in its
+own tmux pane:
+
+```
+Create a team of 3: one agent to map every service in the compose files and
+its env vars, one to check the k3d cluster config, one to list mismatches
+between them.
+```
+
+That produces three panes you can watch at once, plus the lead pane you typed
+into. Press `prefix` + `t` to tile them evenly, `prefix` + `z` to zoom into
+whichever agent is doing something interesting, and `prefix` + `z` again to go
+back to the full view.
+
+More prompts in the same shape:
+
+```
+Create a team of 3: one to audit the Terraform modules for hardcoded secrets,
+one to diff the staging and prod variable files, one to write up what has
+drifted.
+
+Create a team of 4, one per service (api, worker, scheduler, web): each one
+upgrades its own Dockerfile to the new base image and runs its test suite.
+
+Create a team of 2: one to reproduce the failing integration test, one to
+bisect the last 20 commits for where it broke. Report to me before changing
+anything.
+```
+
+What makes a prompt work here:
+
+- **Name the count.** "A team of 3" is unambiguous; "some agents" is not.
+- **Give each agent a job it can finish alone.** Agents that need each other's
+  output serialise, and you lose the point of watching them in parallel.
+- **Split by file, service or directory** when you can — that keeps two agents
+  from editing the same file.
+- **Say what to do at the end** ("list mismatches", "report to me before
+  changing anything") so the run has a clear finish line.
+
+Detach with `prefix` + `d` while a team is working; the agents keep going and
+`ct` re-attaches you to the same panes.
 
 When you are done:
 

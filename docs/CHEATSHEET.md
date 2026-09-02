@@ -2,6 +2,20 @@
 
 Prefix is **Ctrl+a** (`prefix` below). Press the prefix, release, then the key.
 
+## Starting a team
+
+Type the prompt inside a session started with `ct`. Name the agent count and
+give each agent a job it can finish on its own:
+
+```
+Create a team of 3: one agent to map every service in the compose files and
+its env vars, one to check the k3d cluster config, one to list mismatches
+between them.
+```
+
+One pane per teammate, plus your lead pane. `prefix` + `t` to tile them,
+`prefix` + `z` to zoom one, `prefix` + `d` to detach and leave them running.
+
 ## Sessions
 
 | Command | Action |
