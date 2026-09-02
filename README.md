@@ -4,6 +4,8 @@ Watch Claude Code agent teams work side by side, each teammate in its own tmux p
 
 Claude Code can run a team of agents in parallel. When it is started from inside tmux it spawns every teammate into a real pane, so you see all of them at once instead of a single scrolling log. This repository is the whole setup around that: the tmux config, the status bar, the launcher, a cleanup command for the sessions and processes long runs leave behind, and a doctor command that tells you which piece is missing.
 
+![Three Claude Code agents running side by side in tmux panes, each in its own pane](docs/images/agent-team.png)
+
 ---
 
 ## What you get
@@ -74,6 +76,18 @@ That produces three panes you can watch at once, plus the lead pane you typed
 into. Press `prefix` + `t` to tile them evenly, `prefix` + `z` to zoom into
 whichever agent is doing something interesting, and `prefix` + `z` again to go
 back to the full view.
+
+To see the panes appear without waiting for real work, ask for a team that only
+introduces itself — this is the prompt behind the screenshot at the top:
+
+```
+Create a team of 3, and have each agent print one line saying hi and what its
+role is: agent 1 maps the compose services and env vars, agent 2 checks the k3d
+cluster config, agent 3 lists mismatches between them. No tools, no file reads.
+```
+
+Three panes open, each prints its greeting, and they sit idle until you close
+them (`ctc`, or `prefix` + `x` per pane).
 
 More prompts in the same shape:
 
