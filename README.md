@@ -6,6 +6,8 @@ Claude Code can run a team of agents in parallel. When it is started from inside
 
 ![Three Claude Code agents running side by side in tmux panes, each in its own pane](docs/images/agent-team.png)
 
+*One lead pane and three teammates, each reporting its own role.*
+
 ---
 
 ## What you get
