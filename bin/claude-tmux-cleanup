@@ -20,10 +20,17 @@ Options:
   -f, --force      Do not ask for confirmation.
   -n, --dry-run    Print what would happen, change nothing.
   -p, --prune      Also kill Claude Code processes that are not in a tmux pane.
-                   These are listed before anything happens; combined with
-                   --force this will also kill a plain terminal claude session,
-                   so prefer --dry-run first.
+                   The scan runs after the sessions above are killed, so it
+                   catches processes orphaned by this same run as well as ones
+                   that were already stray. Combined with --force this will
+                   also kill a plain terminal claude session, so prefer
+                   --dry-run first.
   -h, --help       Show this help and exit.
+
+Exit status:
+  0  finished, or nothing to do
+  1  could not run, or something refused to die
+  2  bad usage
 
 Examples:
   claude-tmux-cleanup                 # interactive sweep
@@ -88,13 +95,40 @@ describe_session() {
 		-F '      pane #{window_index}.#{pane_index}: #{pane_current_command} (pid #{pane_pid})' 2>/dev/null || true
 }
 
+failures=0
+
 kill_session() {
 	local session=$1
 	if [ "$dry_run" -eq 1 ]; then
 		echo "  would kill $session"
 		return 0
 	fi
-	tmux kill-session -t "=$session" && echo "  killed $session"
+	if tmux kill-session -t "=$session" 2>/dev/null; then
+		echo "  killed $session"
+	else
+		echo "  could not kill $session" >&2
+		failures=$((failures + 1))
+	fi
+}
+
+# Poll until every pid is gone, or until the deadline. tmux SIGHUPs pane
+# processes and returns straight away, so without this the stray scan below
+# races the shutdown and reports a different answer run to run.
+wait_for_exit() {
+	local ticks=20 pid alive
+	while [ "$ticks" -gt 0 ]; do
+		alive=0
+		for pid in "$@"; do
+			if kill -0 "$pid" 2>/dev/null; then
+				alive=1
+			fi
+		done
+		if [ "$alive" -eq 0 ]; then
+			return 0
+		fi
+		sleep 0.1
+		ticks=$((ticks - 1))
+	done
 }
 
 confirm() {
@@ -150,14 +184,31 @@ if [ ${#selected[@]} -gt 0 ]; then
 			selected=()
 		}
 	fi
+	# Recorded before the kills so we know which processes this run is about to
+	# orphan, and can wait for them below.
+	doomed=()
+	if [ "$dry_run" -ne 1 ]; then
+		for session in ${selected+"${selected[@]}"}; do
+			while IFS= read -r pid; do
+				[ -n "$pid" ] || continue
+				doomed+=("$pid")
+			done < <(tmux list-panes -s -t "=$session" -F '#{pane_pid}' 2>/dev/null || true)
+		done
+	fi
+
 	for session in ${selected+"${selected[@]}"}; do
 		kill_session "$session"
 	done
+
+	if [ ${#doomed[@]} -gt 0 ]; then
+		wait_for_exit "${doomed[@]}"
+	fi
 fi
 
-# Claude Code processes that are not sitting in a live tmux pane. These are
-# what long agent-team runs leave behind, but the same query also catches a
-# plain terminal session, so nothing here is killed without --prune.
+# Claude Code processes that are not sitting in a live tmux pane. Deliberately
+# scanned after the session kills above, so it covers both what long agent-team
+# runs left behind earlier and what this run just orphaned. The same query also
+# catches a plain terminal session, so nothing here is killed without --prune.
 #
 # Two exclusions keep this safe:
 #   - editor integrations (VS Code, JetBrains) drive claude over stdio with no
@@ -189,6 +240,7 @@ done < <(pgrep -f '(^|/)claude( |$)' 2>/dev/null || true)
 
 if [ ${#stray[@]} -eq 0 ]; then
 	echo "No Claude Code processes outside tmux panes."
+	[ "$failures" -eq 0 ] || exit 1
 	exit 0
 fi
 
@@ -200,6 +252,7 @@ ps -o pid=,etime=,command= -p "$(
 
 if [ "$prune" -ne 1 ]; then
 	echo "Re-run with --prune to kill them."
+	[ "$failures" -eq 0 ] || exit 1
 	exit 0
 fi
 
@@ -210,9 +263,24 @@ fi
 
 confirm "Kill ${#stray[@]} process(es) listed above?" || {
 	echo "Left running."
+	[ "$failures" -eq 0 ] || exit 1
 	exit 0
 }
 
+# A pid can die between the scan and here, so a failed kill is only worth
+# reporting when the process is still there.
 for pid in "${stray[@]}"; do
-	kill "$pid" 2>/dev/null && echo "  killed pid $pid"
+	if ! kill -0 "$pid" 2>/dev/null; then
+		echo "  pid $pid already gone"
+		continue
+	fi
+	if kill "$pid" 2>/dev/null; then
+		echo "  killed pid $pid"
+	else
+		echo "  could not kill pid $pid" >&2
+		failures=$((failures + 1))
+	fi
 done
+
+[ "$failures" -eq 0 ] || exit 1
+exit 0
