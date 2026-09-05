@@ -1,5 +1,10 @@
 # claude-code-tmux
 
+[![ci](https://github.com/s403o/claude-code-tmux/actions/workflows/ci.yml/badge.svg)](https://github.com/s403o/claude-code-tmux/actions/workflows/ci.yml)
+[![licence: MIT](https://img.shields.io/badge/licence-MIT-blue.svg)](LICENSE)
+[![platform: macOS | Linux](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey.svg)](#install)
+[![tmux 3.0+](https://img.shields.io/badge/tmux-3.0%2B-1BB91F.svg)](https://github.com/tmux/tmux)
+
 **Watch a Claude Code agent team work side by side — one teammate per tmux pane.**
 
 ![Three Claude Code agents running side by side in tmux panes, each in its own pane](docs/images/agent-team.png)
