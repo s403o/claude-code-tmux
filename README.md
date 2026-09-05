@@ -63,7 +63,7 @@ Everything else is ergonomics: `remain-on-exit off` so finished panes vanish, pa
 | `./uninstall.sh` | Remove the symlinks. `--plugins --settings` to go further |
 | `make check` | shellcheck + shfmt + smoke tests |
 
-`ctc` refuses to run inside tmux, never kills the session that launched it, and ignores editor-hosted Claude processes.
+`ctc` refuses to run inside tmux, never kills the session that launched it, and ignores editor-hosted Claude processes. `ctc --dry-run` only inspects; `ctc --all --force --prune` is the mutating end — it kills the sessions, waits for their panes to exit, then kills both the Claude processes that run just orphaned and any that were already stray. Exit status: `0` done or nothing to do, `1` could not run or something refused to die, `2` bad usage.
 
 Something not working? [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
 
